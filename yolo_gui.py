@@ -102,6 +102,47 @@ class TrainingConfig:
         return command
 
 
+def generate_mock_training_configs(count: int = 30) -> list[TrainingConfig]:
+    """Create a list of mock ``TrainingConfig`` instances for experimentation.
+
+    Parameters
+    ----------
+    count:
+        Number of mock configurations to generate. Defaults to 30.
+
+    Returns
+    -------
+    list[TrainingConfig]
+        Generated configurations cycling through the supported YOLO tasks.
+
+    Raises
+    ------
+    ValueError
+        If ``count`` is not a positive integer.
+    """
+
+    if count <= 0:
+        raise ValueError("count must be a positive integer")
+
+    tasks = ("detect", "segment", "classify", "pose")
+    configs: list[TrainingConfig] = []
+
+    for index in range(count):
+        configs.append(
+            TrainingConfig(
+                dataset_yaml=f"data/mock_dataset_{index}.yaml",
+                model_weights=f"weights/mock_weights_{index}.pt",
+                epochs=10 + index,
+                batch_size=4 + (index % 8),
+                image_size=416 + (index % 5) * 32,
+                project_name=f"mock_project_{index}",
+                task=tasks[index % len(tasks)],
+            )
+        )
+
+    return configs
+
+
 class YOLOTrainerGUI:
     """Tkinter application for configuring and launching YOLO training."""
 

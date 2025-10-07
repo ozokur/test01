@@ -1,6 +1,10 @@
 import unittest
 
-from yolo_gui import TrainingConfig, describe_cuda_support
+from yolo_gui import (
+    TrainingConfig,
+    describe_cuda_support,
+    generate_mock_training_configs,
+)
 
 
 class TrainingConfigTests(unittest.TestCase):
@@ -86,6 +90,25 @@ class DescribeCudaSupportTests(unittest.TestCase):
         message = describe_cuda_support(FakeTorch())
 
         self.assertEqual(message, "CUDA Support: PyTorch without CUDA support")
+
+
+class GenerateMockTrainingConfigsTests(unittest.TestCase):
+    def test_creates_requested_number_of_configs(self):
+        configs = generate_mock_training_configs()
+
+        self.assertEqual(len(configs), 30)
+        self.assertTrue(all(isinstance(cfg, TrainingConfig) for cfg in configs))
+
+    def test_supports_custom_count(self):
+        configs = generate_mock_training_configs(12)
+
+        self.assertEqual(len(configs), 12)
+        self.assertEqual(configs[0].dataset_yaml, "data/mock_dataset_0.yaml")
+        self.assertEqual(configs[-1].project_name, "mock_project_11")
+
+    def test_rejects_non_positive_count(self):
+        with self.assertRaises(ValueError):
+            generate_mock_training_configs(0)
 
 
 if __name__ == "__main__":

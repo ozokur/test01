@@ -48,6 +48,13 @@ training log output.
 
 ![YOLO GUI mock-up](assets/yolo_gui_mockup.svg)
 
+## Mock configurations for dry runs
+
+If you want to experiment without launching real training jobs, call
+`generate_mock_training_configs()` from `yolo_gui.py`. By default it returns 30
+distinct `TrainingConfig` objects that simulate different tasks and
+hyperparameters, making it easy to script dry runs or populate demos.
+
 ## Testing
 
 Run the unit tests to verify the command-building logic for the training
