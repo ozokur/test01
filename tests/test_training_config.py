@@ -4,8 +4,10 @@ import unittest
 
 from yolo_gui import (
     DEFAULT_PRETRAINED_MODEL,
+    DetectedObject,
     InferenceStats,
     TrainingConfig,
+    collect_box_detections,
     count_predictions_from_results,
     describe_cuda_support,
     generate_mock_training_configs,
@@ -212,6 +214,43 @@ class CountPredictionsFromResultsTests(unittest.TestCase):
                 self.foo = "bar"
 
         self.assertIsNone(count_predictions_from_results([Result()]))
+
+
+class CollectBoxDetectionsTests(unittest.TestCase):
+    def test_extracts_boxes_with_labels(self):
+        class FakeTensor:
+            def __init__(self, data):
+                self._data = data
+
+            def tolist(self):
+                return self._data
+
+        class FakeBoxes:
+            def __init__(self):
+                self.xyxy = FakeTensor([[0, 1, 2, 3], [10, 11, 12, 13]])
+                self.cls = FakeTensor([0, 1])
+                self.conf = FakeTensor([0.9, 0.5])
+
+        class FakeResult:
+            def __init__(self):
+                self.boxes = FakeBoxes()
+                self.names = {0: "person", 1: "dog"}
+
+        detections = collect_box_detections([FakeResult()])
+
+        self.assertEqual(len(detections), 2)
+        self.assertTrue(all(isinstance(det, DetectedObject) for det in detections))
+        self.assertEqual(detections[0].label, "person")
+        self.assertAlmostEqual(detections[0].xyxy[2], 2.0)
+        self.assertAlmostEqual(detections[1].confidence, 0.5)
+
+    def test_handles_missing_data_gracefully(self):
+        class EmptyResult:
+            def __init__(self):
+                self.names = {}
+
+        self.assertEqual(collect_box_detections([]), [])
+        self.assertEqual(collect_box_detections([EmptyResult()]), [])
 
 
 class ListImageFilesTests(unittest.TestCase):

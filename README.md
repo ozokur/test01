@@ -13,7 +13,7 @@ select pre-trained weights, and start training with a friendly interface.
 - (Optional) [PyTorch](https://pytorch.org/get-started/locally/) with CUDA
   support if you plan to leverage GPU acceleration
 - (Optional) [`Pillow`](https://pypi.org/project/Pillow/) for high-quality
-  previews of test images inside the GUI
+  previews of test images and on-screen detection overlays inside the GUI
 
 ## Quick command checklist
 
@@ -117,9 +117,11 @@ box) you can test the model without leaving the GUI:
 2. Cycle through the images with the navigation buttons to preview filenames
    and counts. A separate preview window automatically opens to display the
    highlighted image, resizing it to fit within the window.
-3. Press **Solve** to invoke `yolo mode=predict` on the active image. The log
-   view displays CLI output alongside a summary of how long the inference took
-   and whether any objects were detected.
+3. Press **Solve** to invoke `yolo mode=predict` on the active image. When
+   Pillow is available, the preview window refreshes with bounding boxes and
+   class labels for every detection so you can visually confirm the results.
+   The log view also reports how long the inference took and summarizes the
+   number of detections per class.
 4. Keep an eye on the performance banner under the buttons to see how many
    images have been processed, together with the latest, average, and best
    inference times plus the detection count from the most recent run.

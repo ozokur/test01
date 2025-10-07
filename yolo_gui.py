@@ -28,12 +28,13 @@ import subprocess
 import threading
 import time
 import tkinter as tk
+from collections import Counter
 from dataclasses import dataclass, field
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Optional
 
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.5.0"
 
 
 DEFAULT_PRETRAINED_MODEL = "yolov8n.pt"
@@ -95,25 +96,27 @@ def _load_ultralytics_model_class() -> Optional[Any]:
 YOLO_MODEL_CLASS = _load_ultralytics_model_class()
 
 
-def _load_pil_components() -> tuple[Optional[Any], Optional[Any]]:
-    """Return Pillow's ``Image`` and ``ImageTk`` modules when available."""
+def _load_pil_components() -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+    """Return Pillow's ``Image``, ``ImageTk`` and ``ImageDraw`` modules when available."""
 
     pillow_spec = importlib.util.find_spec("PIL")
     if pillow_spec is None:
-        return None, None
+        return None, None, None
 
     image_spec = importlib.util.find_spec("PIL.Image")
     imgtk_spec = importlib.util.find_spec("PIL.ImageTk")
+    draw_spec = importlib.util.find_spec("PIL.ImageDraw")
 
-    if image_spec is None or imgtk_spec is None:
-        return None, None
+    if image_spec is None or imgtk_spec is None or draw_spec is None:
+        return None, None, None
 
     image_module = importlib.import_module("PIL.Image")
     imgtk_module = importlib.import_module("PIL.ImageTk")
-    return image_module, imgtk_module
+    draw_module = importlib.import_module("PIL.ImageDraw")
+    return image_module, imgtk_module, draw_module
 
 
-PIL_IMAGE_MODULE, PIL_IMAGETK_MODULE = _load_pil_components()
+PIL_IMAGE_MODULE, PIL_IMAGETK_MODULE, PIL_IMAGEDRAW_MODULE = _load_pil_components()
 
 
 def describe_cuda_support(torch_module: Optional[Any] = None) -> str:
@@ -312,6 +315,120 @@ class InferenceStats:
         )
 
 
+@dataclass(frozen=True)
+class DetectedObject:
+    """Bounding box metadata extracted from YOLO inference results."""
+
+    xyxy: tuple[float, float, float, float]
+    label: str
+    confidence: Optional[float] = None
+
+    def formatted_label(self) -> str:
+        if self.confidence is None:
+            return self.label
+        return f"{self.label} ({self.confidence:.2f})"
+
+
+BOUNDING_BOX_COLORS = [
+    "#FF6B6B",
+    "#6BCB77",
+    "#4D96FF",
+    "#FFD93D",
+    "#9B5DE5",
+    "#FF8E00",
+]
+
+
+def _coerce_to_list(value: Any) -> list[Any]:
+    """Best-effort conversion of array-like objects to a Python list."""
+
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            return []
+
+    try:
+        return list(value)
+    except Exception:
+        return []
+
+
+def collect_box_detections(results: Any) -> list[DetectedObject]:
+    """Extract bounding boxes, labels and confidences from YOLO results."""
+
+    try:
+        iterable = list(results)
+    except TypeError:
+        return []
+
+    if not iterable:
+        return []
+
+    detections: list[DetectedObject] = []
+
+    for result in iterable:
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            continue
+
+        xyxy_values = _coerce_to_list(getattr(boxes, "xyxy", None))
+        cls_values = _coerce_to_list(getattr(boxes, "cls", None))
+        conf_values = _coerce_to_list(getattr(boxes, "conf", None))
+
+        names = getattr(result, "names", None)
+        name_lookup = names if isinstance(names, dict) else {}
+
+        for index, bbox in enumerate(xyxy_values):
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+
+            cls_idx: Optional[int] = None
+            if index < len(cls_values):
+                try:
+                    cls_idx = int(cls_values[index])
+                except (TypeError, ValueError):
+                    cls_idx = None
+
+            confidence: Optional[float] = None
+            if index < len(conf_values):
+                try:
+                    confidence = float(conf_values[index])
+                except (TypeError, ValueError):
+                    confidence = None
+
+            label = (
+                name_lookup.get(cls_idx, str(cls_idx))
+                if cls_idx is not None
+                else "unknown"
+            )
+
+            detections.append(
+                DetectedObject(
+                    xyxy=(
+                        float(bbox[0]),
+                        float(bbox[1]),
+                        float(bbox[2]),
+                        float(bbox[3]),
+                    ),
+                    label=label,
+                    confidence=confidence,
+                )
+            )
+
+    return detections
+
+
 def parse_detection_count(output: str) -> Optional[int]:
     """Try to extract the number of detections from CLI output."""
 
@@ -407,10 +524,12 @@ class YOLOTrainerGUI:
         self.test_images: list[str] = []
         self.current_image_index: int = -1
         self.inference_stats = InferenceStats()
+        self.detections_by_image: dict[str, list[DetectedObject]] = {}
         self.preview_window: Optional[tk.Toplevel] = None
         self.preview_label: Optional[tk.Label] = None
         self._preview_photo: Optional[tk.PhotoImage] = None
         self._notified_missing_pillow = False
+        self._notified_missing_overlay = False
 
         self._create_widgets()
         self._start_log_updater()
@@ -627,6 +746,7 @@ class YOLOTrainerGUI:
         self.test_images = images
         self.current_image_index = 0
         self.inference_stats = InferenceStats()
+        self.detections_by_image = {}
         self._update_performance_label()
         self._update_test_controls()
         self._update_current_image_label()
@@ -667,7 +787,8 @@ class YOLOTrainerGUI:
         self._preview_photo = None
 
     def _display_current_image(self, image_path: str) -> None:
-        photo = self._create_photo_image(image_path)
+        detections = self.detections_by_image.get(image_path)
+        photo = self._create_photo_image(image_path, detections)
         if photo is None:
             self._close_preview_window()
             return
@@ -681,10 +802,76 @@ class YOLOTrainerGUI:
         self.preview_label.configure(image=photo)
         self.preview_label.image = photo
 
-    def _create_photo_image(self, image_path: str) -> Optional[tk.PhotoImage]:
+    def _create_photo_image(
+        self, image_path: str, detections: Optional[list[DetectedObject]]
+    ) -> Optional[tk.PhotoImage]:
+        overlay_requested = bool(detections)
+
+        if (
+            overlay_requested
+            and (
+                PIL_IMAGE_MODULE is None
+                or PIL_IMAGETK_MODULE is None
+                or PIL_IMAGEDRAW_MODULE is None
+            )
+            and not self._notified_missing_overlay
+        ):
+            self._append_log(
+                "Bounding boxes require Pillow. Install Pillow to view detection overlays."
+            )
+            self._notified_missing_overlay = True
+
         if PIL_IMAGE_MODULE is not None and PIL_IMAGETK_MODULE is not None:
             try:
-                image = PIL_IMAGE_MODULE.open(image_path)
+                image = PIL_IMAGE_MODULE.open(image_path).convert("RGB")
+
+                if overlay_requested and detections and PIL_IMAGEDRAW_MODULE is not None:
+                    drawer = PIL_IMAGEDRAW_MODULE.Draw(image)
+                    for detection in detections:
+                        color = BOUNDING_BOX_COLORS[
+                            hash(detection.label) % len(BOUNDING_BOX_COLORS)
+                        ]
+
+                        x1, y1, x2, y2 = detection.xyxy
+                        box_points = [int(x1), int(y1), int(x2), int(y2)]
+                        drawer.rectangle(box_points, outline=color, width=3)
+
+                        label_text = detection.formatted_label()
+                        if label_text:
+                            padding = 4
+                            text_bbox = None
+                            if hasattr(drawer, "textbbox"):
+                                try:
+                                    text_bbox = drawer.textbbox((0, 0), label_text)
+                                except Exception:
+                                    text_bbox = None
+
+                            if text_bbox is not None:
+                                text_width = text_bbox[2] - text_bbox[0]
+                                text_height = text_bbox[3] - text_bbox[1]
+                            else:
+                                try:
+                                    text_width, text_height = drawer.textsize(label_text)
+                                except Exception:
+                                    text_width, text_height = (0, 0)
+
+                            background_top = max(int(y1) - text_height - 2 * padding, 0)
+                            background = [
+                                int(x1),
+                                background_top,
+                                int(x1) + text_width + 2 * padding,
+                                background_top + text_height + 2 * padding,
+                            ]
+                            drawer.rectangle(background, fill=color)
+                            text_position = (
+                                int(x1) + padding,
+                                background_top + padding,
+                            )
+                            try:
+                                drawer.text(text_position, label_text, fill="#000000")
+                            except Exception:
+                                drawer.text(text_position, label_text)
+
                 max_size = (960, 720)
                 resampling_attr = getattr(PIL_IMAGE_MODULE, "Resampling", None)
                 if resampling_attr is not None:
@@ -769,6 +956,7 @@ class YOLOTrainerGUI:
             return
 
         image_path = self.test_images[self.current_image_index]
+        self.detections_by_image.pop(image_path, None)
         self._display_current_image(image_path)
         task = self.task_var.get().strip() or "detect"
 
@@ -796,11 +984,18 @@ class YOLOTrainerGUI:
                         results = model.predict(image_path, verbose=False)
                         duration = time.perf_counter() - start_time
                         detection_count = count_predictions_from_results(results)
+                        detection_boxes = collect_box_detections(results)
+                        if detection_count is None:
+                            detection_count = len(detection_boxes)
+                        self.detections_by_image[image_path] = detection_boxes
+                        self.root.after(
+                            0, lambda path=image_path: self._display_current_image(path)
+                        )
                         self.inference_stats.record(duration, detection_count)
                         self.log_queue.put(
                             f"Inference completed in {duration:.2f}s for {os.path.basename(image_path)}."
                         )
-                        self._log_detection_summary(detection_count)
+                        self._log_detection_summary(detection_count, detection_boxes)
                         return
                     except Exception as exc:
                         self.log_queue.put(
@@ -816,6 +1011,7 @@ class YOLOTrainerGUI:
                     check=False,
                 )
                 duration = time.perf_counter() - start_time
+                self.detections_by_image.pop(image_path, None)
                 if result.stdout:
                     for line in result.stdout.splitlines():
                         self.log_queue.put(line)
@@ -826,7 +1022,7 @@ class YOLOTrainerGUI:
                     self.log_queue.put(
                         f"Inference completed in {duration:.2f}s for {os.path.basename(image_path)}."
                     )
-                    self._log_detection_summary(detection_count)
+                    self._log_detection_summary(detection_count, None)
                 else:
                     self.log_queue.put(
                         f"Inference failed with exit code {result.returncode}."
@@ -847,7 +1043,11 @@ class YOLOTrainerGUI:
     def _update_performance_label(self) -> None:
         self.performance_var.set(self.inference_stats.describe())
 
-    def _log_detection_summary(self, detection_count: Optional[int]) -> None:
+    def _log_detection_summary(
+        self,
+        detection_count: Optional[int],
+        detections: Optional[list[DetectedObject]],
+    ) -> None:
         if detection_count is None:
             self.log_queue.put(
                 "Detections: Unable to determine. Review the output above for details."
@@ -860,6 +1060,18 @@ class YOLOTrainerGUI:
             self.log_queue.put("Detections: 1 object detected.")
         else:
             self.log_queue.put(f"Detections: {detection_count} objects detected.")
+
+        if not detections:
+            return
+
+        class_counts = Counter(det.label for det in detections)
+        if not class_counts:
+            return
+
+        breakdown = ", ".join(
+            f"{label}: {class_counts[label]}" for label in sorted(class_counts)
+        )
+        self.log_queue.put(f"Detected classes → {breakdown}")
 
     def _validate_config(self) -> Optional[TrainingConfig]:
         dataset_yaml = self.dataset_var.get().strip()

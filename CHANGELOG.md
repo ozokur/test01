@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2024-05-21
+### Added
+- Bounding-box overlays with class labels when running model tests so detections
+  are highlighted directly in the preview window.
+- Log summaries that break detections down by class, making it easier to see
+  which objects were found during inference.
+- Helper utilities and unit tests for extracting structured detection metadata
+  from Ultralytics results, plus GUI updates that refresh overlays after each
+  run.
+
 ## [1.4.1] - 2024-05-21
 ### Added
 - Default YOLOv8 weights alias pre-populated in the GUI so the app launches
