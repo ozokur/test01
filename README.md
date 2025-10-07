@@ -13,6 +13,28 @@ select pre-trained weights, and start training with a friendly interface.
 - (Optional) [PyTorch](https://pytorch.org/get-started/locally/) with CUDA
   support if you plan to leverage GPU acceleration
 
+## Quick command checklist
+
+Follow the commands below if you just want the fastest path from cloning the
+repository to launching the GUI:
+
+```bash
+# 1. (Optional) Create and activate a virtual environment
+./scripts/create_virtualenv.sh
+source .venv/bin/activate
+
+# 2. Install Python dependencies inside that environment
+./scripts/install_dependencies.sh
+
+# 3. Launch the YOLO training GUI
+./scripts/run_gui.sh
+
+# 4. (Optional) Run the automated tests
+python -m unittest discover -s tests
+```
+
+Each command can be executed independently if you only need a specific step.
+
 Optionally create and activate an isolated virtual environment:
 
 ```bash

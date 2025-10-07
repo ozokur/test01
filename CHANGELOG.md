@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 - Scripted shortcut for creating a Python virtual environment before installing dependencies.
 - Documentation updates covering the new helper and activation instructions.
 
+## [1.2.1] - 2024-05-21
+### Added
+- Consolidated quick-start command checklist covering virtual environment setup,
+  dependency installation, GUI launch, and running the automated tests.
+
 ## [1.1.0] - 2024-05-21
 ### Added
 - Convenience scripts for installing dependencies and launching the GUI.
