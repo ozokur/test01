@@ -528,6 +528,11 @@ class YOLOTrainerGUI:
         self.preview_window: Optional[tk.Toplevel] = None
         self.preview_label: Optional[tk.Label] = None
         self._preview_photo: Optional[tk.PhotoImage] = None
+        self._preview_original_image: Optional[Any] = None
+        self._preview_resample_filter: Optional[Any] = None
+        self._preview_resize_job: Optional[str] = None
+        self._preview_last_requested_size: Optional[tuple[int, int]] = None
+        self._preview_last_rendered_size: Optional[tuple[int, int]] = None
         self._notified_missing_pillow = False
         self._notified_missing_overlay = False
 
@@ -771,6 +776,7 @@ class YOLOTrainerGUI:
 
         self.preview_label = tk.Label(self.preview_window, anchor="center", bg="#202020")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
+        self.preview_label.bind("<Configure>", self._on_preview_label_configure)
 
     def _on_preview_close(self) -> None:
         self._close_preview_window()
@@ -785,6 +791,16 @@ class YOLOTrainerGUI:
         self.preview_window = None
         self.preview_label = None
         self._preview_photo = None
+        self._preview_original_image = None
+        self._preview_resample_filter = None
+        self._preview_last_requested_size = None
+        self._preview_last_rendered_size = None
+        if self._preview_resize_job is not None:
+            try:
+                self.root.after_cancel(self._preview_resize_job)
+            except Exception:
+                pass
+        self._preview_resize_job = None
 
     def _display_current_image(self, image_path: str) -> None:
         detections = self.detections_by_image.get(image_path)
@@ -801,9 +817,13 @@ class YOLOTrainerGUI:
         self._preview_photo = photo
         self.preview_label.configure(image=photo)
         self.preview_label.image = photo
+        self._preview_last_rendered_size = (photo.width(), photo.height())
+        self._preview_last_requested_size = None
 
     def _create_photo_image(
-        self, image_path: str, detections: Optional[list[DetectedObject]]
+        self,
+        image_path: str,
+        detections: Optional[list[DetectedObject]],
     ) -> Optional[tk.PhotoImage]:
         overlay_requested = bool(detections)
 
@@ -872,7 +892,7 @@ class YOLOTrainerGUI:
                             except Exception:
                                 drawer.text(text_position, label_text)
 
-                max_size = (960, 720)
+                self._preview_original_image = image.copy()
                 resampling_attr = getattr(PIL_IMAGE_MODULE, "Resampling", None)
                 if resampling_attr is not None:
                     resample = resampling_attr.LANCZOS
@@ -880,19 +900,19 @@ class YOLOTrainerGUI:
                     resample = getattr(PIL_IMAGE_MODULE, "LANCZOS", None)
                     if resample is None:
                         resample = getattr(PIL_IMAGE_MODULE, "ANTIALIAS", None)
+                self._preview_resample_filter = resample
 
-                if resample is not None:
-                    image.thumbnail(max_size, resample=resample)
-                else:
-                    image.thumbnail(max_size)
-
-                return PIL_IMAGETK_MODULE.PhotoImage(image=image)
+                photo = self._render_preview_from_original((960, 720))
+                if photo is not None:
+                    return photo
             except Exception as exc:
                 self._append_log(
                     "Preview error: Pillow could not load "
                     f"{os.path.basename(image_path)} ({exc}). Falling back to Tkinter loader."
                 )
 
+        self._preview_original_image = None
+        self._preview_resample_filter = None
         if PIL_IMAGE_MODULE is None and not self._notified_missing_pillow:
             self._append_log(
                 "Install Pillow to enable high-quality previews for additional image formats."
@@ -906,6 +926,74 @@ class YOLOTrainerGUI:
                 f"Preview error: Unable to display {os.path.basename(image_path)} ({exc})."
             )
             return None
+
+    def _render_preview_from_original(
+        self, max_size: tuple[int, int]
+    ) -> Optional[tk.PhotoImage]:
+        if (
+            PIL_IMAGETK_MODULE is None
+            or self._preview_original_image is None
+            or max_size[0] <= 0
+            or max_size[1] <= 0
+        ):
+            return None
+
+        try:
+            render_image = self._preview_original_image.copy()
+            resample = self._preview_resample_filter
+            if resample is not None:
+                render_image.thumbnail(max_size, resample=resample)
+            else:
+                render_image.thumbnail(max_size)
+            return PIL_IMAGETK_MODULE.PhotoImage(image=render_image)
+        except Exception:
+            return None
+
+    def _on_preview_label_configure(self, event: Any) -> None:
+        if (
+            self.preview_label is None
+            or self._preview_original_image is None
+            or event.width <= 1
+            or event.height <= 1
+        ):
+            return
+
+        desired_size = (event.width, event.height)
+        if self._preview_last_rendered_size == desired_size:
+            return
+        if self._preview_last_requested_size == desired_size:
+            return
+
+        self._preview_last_requested_size = desired_size
+
+        if self._preview_resize_job is not None:
+            try:
+                self.root.after_cancel(self._preview_resize_job)
+            except Exception:
+                pass
+
+        self._preview_resize_job = self.root.after(
+            75, lambda size=desired_size: self._apply_preview_resize(size)
+        )
+
+    def _apply_preview_resize(self, size: tuple[int, int]) -> None:
+        self._preview_resize_job = None
+        if (
+            self.preview_label is None
+            or self._preview_original_image is None
+            or size[0] <= 1
+            or size[1] <= 1
+        ):
+            return
+
+        photo = self._render_preview_from_original(size)
+        if photo is None:
+            return
+
+        self._preview_photo = photo
+        self.preview_label.configure(image=photo)
+        self.preview_label.image = photo
+        self._preview_last_rendered_size = (photo.width(), photo.height())
 
     def _update_current_image_label(self) -> None:
         if not self.test_images or self.current_image_index < 0:
