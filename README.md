@@ -107,10 +107,11 @@ After choosing a weights file you can test the model without leaving the GUI:
 2. Cycle through the images with the navigation buttons to preview filenames
    and counts.
 3. Press **Solve** to invoke `yolo mode=predict` on the active image. The log
-   view displays CLI output alongside a summary of how long the inference took.
+   view displays CLI output alongside a summary of how long the inference took
+   and whether any objects were detected.
 4. Keep an eye on the performance banner under the buttons to see how many
    images have been processed, together with the latest, average, and best
-   inference times.
+   inference times plus the detection count from the most recent run.
 
 The app automatically disables navigation buttons when only a single image is
 available and resets the statistics each time you choose a new folder.

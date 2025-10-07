@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2024-05-21
+### Added
+- Detection summaries in the inference log so you can see when no objects were
+  found versus how many were detected.
+- Expanded performance banner metrics that highlight the most recent detection
+  count and how many test images included objects.
+- Helpers and tests for extracting detection counts from both CLI output and
+  ultralytics Python results, plus automatic usage when running the GUI.
+
 ## [1.3.0] - 2024-05-21
 ### Added
 - Model testing panel with folder selection, navigation controls, and a solve

@@ -5,10 +5,12 @@ import unittest
 from yolo_gui import (
     InferenceStats,
     TrainingConfig,
+    count_predictions_from_results,
     describe_cuda_support,
     generate_mock_training_configs,
     get_app_version,
     list_image_files,
+    parse_detection_count,
 )
 
 
@@ -132,14 +134,18 @@ class InferenceStatsTests(unittest.TestCase):
 
     def test_record_updates_metrics(self):
         stats = InferenceStats()
-        stats.record(0.5)
-        stats.record(0.2)
+        stats.record(0.5, 3)
+        stats.record(0.2, 0)
 
         self.assertEqual(stats.total_images, 2)
         self.assertAlmostEqual(stats.total_time, 0.7)
         self.assertAlmostEqual(stats.average_duration, 0.35)
+        self.assertEqual(stats.total_detections, 3)
+        self.assertEqual(stats.images_with_detections, 1)
         self.assertIn("Runs=2", stats.describe())
         self.assertIn("Best=0.20s", stats.describe())
+        self.assertIn("Detections: 0", stats.describe())
+        self.assertIn("With Objects=1/2", stats.describe())
 
     def test_negative_duration_treated_as_zero(self):
         stats = InferenceStats()
@@ -148,6 +154,46 @@ class InferenceStatsTests(unittest.TestCase):
         self.assertEqual(stats.total_images, 1)
         self.assertEqual(stats.total_time, 0.0)
         self.assertIn("Last=0.00s", stats.describe())
+        self.assertIn("Detections: Unknown", stats.describe())
+        self.assertIn("With Objects=0/1", stats.describe())
+
+
+class ParseDetectionCountTests(unittest.TestCase):
+    def test_extracts_box_pattern(self):
+        output = "some logs... 5 boxes, Speed: 5.0ms"
+        self.assertEqual(parse_detection_count(output), 5)
+
+    def test_returns_none_when_missing(self):
+        self.assertIsNone(parse_detection_count("no detection info here"))
+
+
+class CountPredictionsFromResultsTests(unittest.TestCase):
+    def test_counts_boxes_and_masks(self):
+        class Boxes(list):
+            pass
+
+        class Masks(list):
+            pass
+
+        class Result:
+            def __init__(self, boxes=None, masks=None):
+                self.boxes = boxes
+                self.masks = masks
+
+        results = [
+            Result(boxes=Boxes([1, 2, 3])),
+            Result(masks=Masks([1, 2])),
+            Result(boxes=Boxes()),
+        ]
+
+        self.assertEqual(count_predictions_from_results(results), 5)
+
+    def test_handles_missing_data(self):
+        class Result:
+            def __init__(self):
+                self.foo = "bar"
+
+        self.assertIsNone(count_predictions_from_results([Result()]))
 
 
 class ListImageFilesTests(unittest.TestCase):

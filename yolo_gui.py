@@ -22,6 +22,7 @@ import importlib
 import importlib.util
 import os
 import queue
+import re
 import shlex
 import subprocess
 import threading
@@ -32,7 +33,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Optional
 
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 
 def get_app_version() -> str:
@@ -51,6 +52,20 @@ def _load_torch_module() -> Optional[Any]:
 
 
 TORCH_MODULE = _load_torch_module()
+
+
+def _load_ultralytics_model_class() -> Optional[Any]:
+    """Return the ``YOLO`` class from ultralytics if the package is installed."""
+
+    spec = importlib.util.find_spec("ultralytics")
+    if spec is None:
+        return None
+
+    module = importlib.import_module("ultralytics")
+    return getattr(module, "YOLO", None)
+
+
+YOLO_MODEL_CLASS = _load_ultralytics_model_class()
 
 
 def describe_cuda_support(torch_module: Optional[Any] = None) -> str:
@@ -168,15 +183,18 @@ def list_image_files(folder: str) -> list[str]:
 
 @dataclass
 class InferenceStats:
-    """Track timing metrics for model inference runs."""
+    """Track timing and detection metrics for model inference runs."""
 
     total_images: int = 0
     total_time: float = 0.0
     last_duration: float = 0.0
     best_duration: float = field(default=float("inf"))
+    total_detections: int = 0
+    last_detections: Optional[int] = None
+    images_with_detections: int = 0
 
-    def record(self, duration: float) -> None:
-        """Record a new inference duration in seconds."""
+    def record(self, duration: float, detections: Optional[int] = None) -> None:
+        """Record a new inference duration and detection count."""
 
         safe_duration = max(duration, 0.0)
         self.total_images += 1
@@ -184,6 +202,16 @@ class InferenceStats:
         self.last_duration = safe_duration
         if safe_duration < self.best_duration:
             self.best_duration = safe_duration
+
+        if detections is None:
+            self.last_detections = None
+            return
+
+        safe_detections = max(detections, 0)
+        self.last_detections = safe_detections
+        self.total_detections += safe_detections
+        if safe_detections > 0:
+            self.images_with_detections += 1
 
     @property
     def average_duration(self) -> float:
@@ -198,13 +226,102 @@ class InferenceStats:
         best_value = (
             f"{self.best_duration:.2f}" if self.best_duration != float("inf") else "-"
         )
+        detection_summary = "Detections: Unknown"
+        if self.last_detections is not None:
+            detection_summary = f"Detections: {self.last_detections}"
+
+        detected_images = f"With Objects={self.images_with_detections}/{self.total_images}"
+        if self.total_images == 0:
+            detected_images = "With Objects=0/0"
+
         return (
             "Performance: "
             f"Runs={self.total_images} | "
             f"Last={self.last_duration:.2f}s | "
             f"Avg={self.average_duration:.2f}s | "
-            f"Best={best_value}s"
+            f"Best={best_value}s | "
+            f"{detection_summary} | "
+            f"{detected_images}"
         )
+
+
+def parse_detection_count(output: str) -> Optional[int]:
+    """Try to extract the number of detections from CLI output."""
+
+    normalized = output.lower()
+    patterns = (
+        r"boxes=([0-9]+)",
+        r"([0-9]+)\s+boxes",
+        r"detections=([0-9]+)",
+        r"([0-9]+)\s+detections",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            try:
+                return int(match.group(1))
+            except (ValueError, TypeError):
+                continue
+
+    return None
+
+
+def count_predictions_from_results(results: Any) -> Optional[int]:
+    """Estimate the number of predictions returned by ultralytics results."""
+
+    if results is None:
+        return None
+
+    try:
+        iterable = list(results)
+    except TypeError:
+        return None
+
+    if not iterable:
+        return 0
+
+    total = 0
+    has_data = False
+
+    for result in iterable:
+        boxes = getattr(result, "boxes", None)
+        if boxes is not None:
+            try:
+                count = len(boxes)
+            except TypeError:
+                count = len(getattr(boxes, "data", []) or [])
+            total += count
+            has_data = True
+            continue
+
+        masks = getattr(result, "masks", None)
+        if masks is not None:
+            try:
+                total += len(masks)
+            except TypeError:
+                total += len(getattr(masks, "data", []) or [])
+            has_data = True
+            continue
+
+        keypoints = getattr(result, "keypoints", None)
+        if keypoints is not None:
+            try:
+                total += len(keypoints)
+            except TypeError:
+                total += len(getattr(keypoints, "data", []) or [])
+            has_data = True
+            continue
+
+        probs = getattr(result, "probs", None)
+        if probs is not None:
+            has_data = True
+            total += 1
+
+    if not has_data:
+        return None
+
+    return total
 
 
 class YOLOTrainerGUI:
@@ -508,8 +625,28 @@ class YOLOTrainerGUI:
         )
 
         def run_inference() -> None:
+            detection_count: Optional[int] = None
             start_time = time.perf_counter()
+
             try:
+                if YOLO_MODEL_CLASS is not None:
+                    try:
+                        model = YOLO_MODEL_CLASS(weights_path)
+                        results = model.predict(image_path, verbose=False)
+                        duration = time.perf_counter() - start_time
+                        detection_count = count_predictions_from_results(results)
+                        self.inference_stats.record(duration, detection_count)
+                        self.log_queue.put(
+                            f"Inference completed in {duration:.2f}s for {os.path.basename(image_path)}."
+                        )
+                        self._log_detection_summary(detection_count)
+                        return
+                    except Exception as exc:
+                        self.log_queue.put(
+                            f"Python inference failed ({exc}). Falling back to CLI execution."
+                        )
+                        start_time = time.perf_counter()
+
                 result = subprocess.run(
                     command,
                     stdout=subprocess.PIPE,
@@ -521,12 +658,14 @@ class YOLOTrainerGUI:
                 if result.stdout:
                     for line in result.stdout.splitlines():
                         self.log_queue.put(line)
+                    detection_count = parse_detection_count(result.stdout)
 
                 if result.returncode == 0:
-                    self.inference_stats.record(duration)
+                    self.inference_stats.record(duration, detection_count)
                     self.log_queue.put(
                         f"Inference completed in {duration:.2f}s for {os.path.basename(image_path)}."
                     )
+                    self._log_detection_summary(detection_count)
                 else:
                     self.log_queue.put(
                         f"Inference failed with exit code {result.returncode}."
@@ -546,6 +685,20 @@ class YOLOTrainerGUI:
 
     def _update_performance_label(self) -> None:
         self.performance_var.set(self.inference_stats.describe())
+
+    def _log_detection_summary(self, detection_count: Optional[int]) -> None:
+        if detection_count is None:
+            self.log_queue.put(
+                "Detections: Unable to determine. Review the output above for details."
+            )
+            return
+
+        if detection_count == 0:
+            self.log_queue.put("Detections: 0 (no objects detected).")
+        elif detection_count == 1:
+            self.log_queue.put("Detections: 1 object detected.")
+        else:
+            self.log_queue.put(f"Detections: {detection_count} objects detected.")
 
     def _validate_config(self) -> Optional[TrainingConfig]:
         dataset_yaml = self.dataset_var.get().strip()
