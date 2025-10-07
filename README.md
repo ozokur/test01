@@ -13,6 +13,17 @@ select pre-trained weights, and start training with a friendly interface.
 - (Optional) [PyTorch](https://pytorch.org/get-started/locally/) with CUDA
   support if you plan to leverage GPU acceleration
 
+Optionally create and activate an isolated virtual environment:
+
+```bash
+./scripts/create_virtualenv.sh
+source .venv/bin/activate
+```
+
+> Pass a custom directory name as the first argument if you do not want to use
+> the default `.venv` folder. Set the `PYTHON_BIN` environment variable before
+> running the script to choose a specific Python executable.
+
 Install dependencies with the provided helper script:
 
 ```bash
