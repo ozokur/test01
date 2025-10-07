@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2024-05-21
+### Added
+- macOS `.command` launcher that opens the GUI with a single double-click and
+  automatically prefers the project virtual environment when available.
+- Documentation describing the Finder-friendly shortcut so Mac users can start
+  the app without touching the terminal.
+
 ## [1.5.0] - 2024-05-21
 ### Added
 - Bounding-box overlays with class labels when running model tests so detections

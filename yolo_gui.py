@@ -34,7 +34,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Optional
 
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 
 
 DEFAULT_PRETRAINED_MODEL = "yolov8n.pt"

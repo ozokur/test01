@@ -69,6 +69,17 @@ Run the GUI application:
 > Pass any additional command-line options to `run_gui.sh` and they will be
 > forwarded to `python yolo_gui.py`.
 
+### macOS one-click launcher
+
+If you prefer launching the GUI from Finder, double-click
+[`scripts/run_gui_mac.command`](scripts/run_gui_mac.command). The shortcut
+automatically opens Terminal, selects the project's virtual environment when
+available, and starts `yolo_gui.py`.
+
+> The `.command` file already has the executable bit set in Git. If you copied it
+> somewhere else manually, run `chmod +x scripts/run_gui_mac.command` once to
+> restore the double-click behaviour.
+
 1. Click **Select** next to "Dataset YAML" to choose your dataset configuration
    file.
 2. Review the default `yolov8n.pt` weights alias that is pre-filled for you or
