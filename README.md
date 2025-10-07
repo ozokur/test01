@@ -36,6 +36,14 @@ python yolo_gui.py
 > **Note:** Ensure that the `yolo` executable from the `ultralytics` package is
 > available on your PATH before starting training.
 
+## GUI Preview
+
+The mock-up below illustrates the layout you will see when launching the
+application, including dataset and weights pickers, hyperparameter fields, and
+training log output.
+
+![YOLO GUI mock-up](assets/yolo_gui_mockup.svg)
+
 ## Testing
 
 Run the unit tests to verify the command-building logic for the training
