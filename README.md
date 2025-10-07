@@ -35,3 +35,12 @@ python yolo_gui.py
 
 > **Note:** Ensure that the `yolo` executable from the `ultralytics` package is
 > available on your PATH before starting training.
+
+## Testing
+
+Run the unit tests to verify the command-building logic for the training
+configuration helper:
+
+```bash
+python -m unittest discover -s tests
+```
