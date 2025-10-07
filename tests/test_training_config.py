@@ -1,10 +1,14 @@
+import os
+import tempfile
 import unittest
 
 from yolo_gui import (
+    InferenceStats,
     TrainingConfig,
     describe_cuda_support,
     generate_mock_training_configs,
     get_app_version,
+    list_image_files,
 )
 
 
@@ -118,6 +122,54 @@ class VersionTests(unittest.TestCase):
 
         self.assertIsInstance(version, str)
         self.assertTrue(version)
+
+
+class InferenceStatsTests(unittest.TestCase):
+    def test_describe_before_any_runs(self):
+        stats = InferenceStats()
+
+        self.assertEqual(stats.describe(), "Performance: No inferences run yet.")
+
+    def test_record_updates_metrics(self):
+        stats = InferenceStats()
+        stats.record(0.5)
+        stats.record(0.2)
+
+        self.assertEqual(stats.total_images, 2)
+        self.assertAlmostEqual(stats.total_time, 0.7)
+        self.assertAlmostEqual(stats.average_duration, 0.35)
+        self.assertIn("Runs=2", stats.describe())
+        self.assertIn("Best=0.20s", stats.describe())
+
+    def test_negative_duration_treated_as_zero(self):
+        stats = InferenceStats()
+        stats.record(-3.0)
+
+        self.assertEqual(stats.total_images, 1)
+        self.assertEqual(stats.total_time, 0.0)
+        self.assertIn("Last=0.00s", stats.describe())
+
+
+class ListImageFilesTests(unittest.TestCase):
+    def test_filters_supported_extensions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            supported = ["image1.jpg", "image2.PNG", "photo.tiff"]
+            unsupported = ["notes.txt", "script.py", "archive.zip"]
+
+            for name in supported + unsupported:
+                path = os.path.join(temp_dir, name)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("test")
+
+            result = list_image_files(temp_dir)
+
+            expected = [
+                os.path.join(temp_dir, "image1.jpg"),
+                os.path.join(temp_dir, "image2.PNG"),
+                os.path.join(temp_dir, "photo.tiff"),
+            ]
+
+            self.assertEqual(result, expected)
 
 
 if __name__ == "__main__":

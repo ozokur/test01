@@ -2,15 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.2.0] - 2024-05-21
+## [1.3.0] - 2024-05-21
 ### Added
-- Scripted shortcut for creating a Python virtual environment before installing dependencies.
-- Documentation updates covering the new helper and activation instructions.
+- Model testing panel with folder selection, navigation controls, and a solve
+  button for running YOLO predictions on individual images.
+- Inference performance tracker that summarizes run counts alongside last,
+  average, and best durations directly in the GUI.
+- Utility helpers and tests for listing supported images and reporting
+  inference metrics.
+- README documentation covering the new evaluation workflow.
 
 ## [1.2.1] - 2024-05-21
 ### Added
 - Consolidated quick-start command checklist covering virtual environment setup,
   dependency installation, GUI launch, and running the automated tests.
+
+## [1.2.0] - 2024-05-21
+### Added
+- Scripted shortcut for creating a Python virtual environment before installing dependencies.
+- Documentation updates covering the new helper and activation instructions.
 
 ## [1.1.0] - 2024-05-21
 ### Added

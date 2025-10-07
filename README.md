@@ -74,7 +74,10 @@ Run the GUI application:
 3. Adjust epochs, batch size, image size, project name, and task as needed.
 4. Press **Start Training** to launch the YOLO CLI in the background. Training
    logs stream into the window. Use **Stop** to terminate the run early.
-5. Review the CUDA status banner above the log area to confirm whether your
+5. Use the **Model Testing** panel to pick an image folder for quick
+   predictions. Navigate between files with **← Previous** and **Next →**,
+   then click **Solve** to run inference on the highlighted image.
+6. Review the CUDA status banner above the log area to confirm whether your
    environment exposes GPU acceleration for PyTorch.
 
 > **Note:** Ensure that the `yolo` executable from the `ultralytics` package is
@@ -94,6 +97,23 @@ If you want to experiment without launching real training jobs, call
 `generate_mock_training_configs()` from `yolo_gui.py`. By default it returns 30
 distinct `TrainingConfig` objects that simulate different tasks and
 hyperparameters, making it easy to script dry runs or populate demos.
+
+## Model testing workflow
+
+After choosing a weights file you can test the model without leaving the GUI:
+
+1. Click **Select** inside the **Model Testing** panel and point to a folder
+   containing sample images.
+2. Cycle through the images with the navigation buttons to preview filenames
+   and counts.
+3. Press **Solve** to invoke `yolo mode=predict` on the active image. The log
+   view displays CLI output alongside a summary of how long the inference took.
+4. Keep an eye on the performance banner under the buttons to see how many
+   images have been processed, together with the latest, average, and best
+   inference times.
+
+The app automatically disables navigation buttons when only a single image is
+available and resets the statistics each time you choose a new folder.
 
 ## Versioning
 

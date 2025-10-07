@@ -25,13 +25,14 @@ import queue
 import shlex
 import subprocess
 import threading
+import time
 import tkinter as tk
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Optional
 
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 
 def get_app_version() -> str:
@@ -153,17 +154,75 @@ def generate_mock_training_configs(count: int = 30) -> list[TrainingConfig]:
     return configs
 
 
+def list_image_files(folder: str) -> list[str]:
+    """Return supported image files inside ``folder`` sorted alphabetically."""
+
+    supported = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff"}
+    files: list[str] = []
+    for entry in sorted(os.listdir(folder)):
+        path = os.path.join(folder, entry)
+        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in supported:
+            files.append(path)
+    return files
+
+
+@dataclass
+class InferenceStats:
+    """Track timing metrics for model inference runs."""
+
+    total_images: int = 0
+    total_time: float = 0.0
+    last_duration: float = 0.0
+    best_duration: float = field(default=float("inf"))
+
+    def record(self, duration: float) -> None:
+        """Record a new inference duration in seconds."""
+
+        safe_duration = max(duration, 0.0)
+        self.total_images += 1
+        self.total_time += safe_duration
+        self.last_duration = safe_duration
+        if safe_duration < self.best_duration:
+            self.best_duration = safe_duration
+
+    @property
+    def average_duration(self) -> float:
+        if self.total_images == 0:
+            return 0.0
+        return self.total_time / self.total_images
+
+    def describe(self) -> str:
+        if self.total_images == 0:
+            return "Performance: No inferences run yet."
+
+        best_value = (
+            f"{self.best_duration:.2f}" if self.best_duration != float("inf") else "-"
+        )
+        return (
+            "Performance: "
+            f"Runs={self.total_images} | "
+            f"Last={self.last_duration:.2f}s | "
+            f"Avg={self.average_duration:.2f}s | "
+            f"Best={best_value}s"
+        )
+
+
 class YOLOTrainerGUI:
     """Tkinter application for configuring and launching YOLO training."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"YOLO Trainer v{get_app_version()}")
-        self.root.geometry("720x520")
+        self.root.geometry("720x620")
 
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.training_thread: Optional[threading.Thread] = None
         self.process: Optional[subprocess.Popen[str]] = None
+        self.inference_thread: Optional[threading.Thread] = None
+
+        self.test_images: list[str] = []
+        self.current_image_index: int = -1
+        self.inference_stats = InferenceStats()
 
         self._create_widgets()
         self._start_log_updater()
@@ -228,9 +287,63 @@ class YOLOTrainerGUI:
         )
         task_combo.grid(row=4, column=1, sticky=tk.EW, **padding)
 
+        # Model testing frame
+        test_frame = ttk.LabelFrame(main_frame, text="Model Testing", padding=10)
+        test_frame.grid(row=3, column=0, columnspan=3, sticky=tk.EW, **padding)
+        test_frame.columnconfigure(1, weight=1)
+
+        test_label = ttk.Label(test_frame, text="Image Folder:")
+        test_label.grid(row=0, column=0, sticky=tk.W, **padding)
+
+        self.test_folder_var = tk.StringVar()
+        test_entry = ttk.Entry(test_frame, textvariable=self.test_folder_var, width=45)
+        test_entry.grid(row=0, column=1, sticky=tk.EW, **padding)
+
+        select_folder_btn = ttk.Button(
+            test_frame, text="Select", command=self._select_test_folder
+        )
+        select_folder_btn.grid(row=0, column=2, sticky=tk.W, **padding)
+
+        self.current_image_var = tk.StringVar(value="No image selected.")
+        current_image_label = ttk.Label(
+            test_frame, textvariable=self.current_image_var, foreground="#555555"
+        )
+        current_image_label.grid(row=1, column=0, columnspan=3, sticky=tk.W, **padding)
+
+        button_container = ttk.Frame(test_frame)
+        button_container.grid(row=2, column=0, columnspan=3, sticky=tk.W, **padding)
+
+        self.prev_button = ttk.Button(
+            button_container,
+            text="← Previous",
+            command=self._show_previous_image,
+            state=tk.DISABLED,
+        )
+        self.prev_button.pack(side=tk.LEFT, padx=4)
+
+        self.solve_button = ttk.Button(
+            button_container,
+            text="Solve",
+            command=self._solve_current_image,
+            state=tk.DISABLED,
+        )
+        self.solve_button.pack(side=tk.LEFT, padx=4)
+
+        self.next_button = ttk.Button(
+            button_container,
+            text="Next →",
+            command=self._show_next_image,
+            state=tk.DISABLED,
+        )
+        self.next_button.pack(side=tk.LEFT, padx=4)
+
+        self.performance_var = tk.StringVar(value=self.inference_stats.describe())
+        performance_label = ttk.Label(test_frame, textvariable=self.performance_var)
+        performance_label.grid(row=3, column=0, columnspan=3, sticky=tk.W, **padding)
+
         # Control buttons
         control_frame = ttk.Frame(main_frame)
-        control_frame.grid(row=3, column=0, columnspan=3, sticky=tk.EW, **padding)
+        control_frame.grid(row=4, column=0, columnspan=3, sticky=tk.EW, **padding)
 
         self.start_button = ttk.Button(
             control_frame, text="Start Training", command=self._start_training
@@ -243,25 +356,25 @@ class YOLOTrainerGUI:
         # CUDA status information
         self.cuda_status_var = tk.StringVar(value="CUDA Support: Checking...")
         cuda_label = ttk.Label(main_frame, textvariable=self.cuda_status_var)
-        cuda_label.grid(row=4, column=0, columnspan=3, sticky=tk.W, **padding)
+        cuda_label.grid(row=5, column=0, columnspan=3, sticky=tk.W, **padding)
 
         self._update_cuda_status()
 
         # Log output
         log_label = ttk.Label(main_frame, text="Training Log")
-        log_label.grid(row=5, column=0, columnspan=3, sticky=tk.W, **padding)
+        log_label.grid(row=6, column=0, columnspan=3, sticky=tk.W, **padding)
 
         self.log_text = tk.Text(main_frame, height=15, wrap=tk.WORD)
-        self.log_text.grid(row=6, column=0, columnspan=3, sticky=tk.NSEW, **padding)
+        self.log_text.grid(row=7, column=0, columnspan=3, sticky=tk.NSEW, **padding)
 
         scrollbar = ttk.Scrollbar(
             main_frame, orient=tk.VERTICAL, command=self.log_text.yview
         )
-        scrollbar.grid(row=6, column=3, sticky=tk.NS)
+        scrollbar.grid(row=7, column=3, sticky=tk.NS)
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(6, weight=1)
+        main_frame.rowconfigure(7, weight=1)
 
     def _add_labeled_entry(
         self,
@@ -302,6 +415,137 @@ class YOLOTrainerGUI:
         )
         if path:
             self.weights_var.set(path)
+
+    def _select_test_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Select image folder for testing")
+        if not folder:
+            return
+
+        images = list_image_files(folder)
+        if not images:
+            messagebox.showinfo(
+                "No images found",
+                "The selected folder does not contain any supported image files.",
+            )
+            return
+
+        self.test_folder_var.set(folder)
+        self.test_images = images
+        self.current_image_index = 0
+        self.inference_stats = InferenceStats()
+        self._update_performance_label()
+        self._update_test_controls()
+        self._update_current_image_label()
+
+    def _update_test_controls(self) -> None:
+        has_images = bool(self.test_images)
+        nav_state = tk.NORMAL if len(self.test_images) > 1 else tk.DISABLED
+
+        self.solve_button.configure(state=tk.NORMAL if has_images else tk.DISABLED)
+        self.prev_button.configure(state=nav_state)
+        self.next_button.configure(state=nav_state)
+
+    def _update_current_image_label(self) -> None:
+        if not self.test_images or self.current_image_index < 0:
+            self.current_image_var.set("No image selected.")
+            return
+
+        image_path = self.test_images[self.current_image_index]
+        self.current_image_var.set(
+            f"Image {self.current_image_index + 1}/{len(self.test_images)}: {image_path}"
+        )
+
+    def _show_next_image(self) -> None:
+        if not self.test_images:
+            return
+        self.current_image_index = (self.current_image_index + 1) % len(self.test_images)
+        self._update_current_image_label()
+
+    def _show_previous_image(self) -> None:
+        if not self.test_images:
+            return
+        self.current_image_index = (self.current_image_index - 1) % len(self.test_images)
+        self._update_current_image_label()
+
+    def _solve_current_image(self) -> None:
+        if not self.test_images:
+            messagebox.showinfo("Model Testing", "Please select an image folder first.")
+            return
+
+        if self.inference_thread and self.inference_thread.is_alive():
+            messagebox.showinfo(
+                "Model Testing",
+                "Inference is already running. Please wait for it to finish.",
+            )
+            return
+
+        weights_path = self.weights_var.get().strip()
+        if not weights_path:
+            messagebox.showerror(
+                "Model Testing", "Select model weights before running inference."
+            )
+            return
+        if not os.path.exists(weights_path):
+            messagebox.showerror(
+                "Model Testing", "Model weights path does not exist."
+            )
+            return
+
+        image_path = self.test_images[self.current_image_index]
+        task = self.task_var.get().strip() or "detect"
+
+        command = [
+            "yolo",
+            f"task={task}",
+            "mode=predict",
+            f"model={weights_path}",
+            f"source={image_path}",
+            "save=False",
+        ]
+
+        self._append_log(
+            "Starting inference with command:\n" f"{shlex.join(command)}\n"
+        )
+
+        def run_inference() -> None:
+            start_time = time.perf_counter()
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                duration = time.perf_counter() - start_time
+                if result.stdout:
+                    for line in result.stdout.splitlines():
+                        self.log_queue.put(line)
+
+                if result.returncode == 0:
+                    self.inference_stats.record(duration)
+                    self.log_queue.put(
+                        f"Inference completed in {duration:.2f}s for {os.path.basename(image_path)}."
+                    )
+                else:
+                    self.log_queue.put(
+                        f"Inference failed with exit code {result.returncode}."
+                    )
+            except FileNotFoundError:
+                self.log_queue.put(
+                    "The 'yolo' command was not found. Install ultralytics and ensure it is on your PATH."
+                )
+            except Exception as exc:
+                self.log_queue.put(f"An unexpected inference error occurred: {exc}")
+            finally:
+                self.inference_thread = None
+                self.root.after(0, self._update_performance_label)
+
+        self.inference_thread = threading.Thread(target=run_inference, daemon=True)
+        self.inference_thread.start()
+
+    def _update_performance_label(self) -> None:
+        self.performance_var.set(self.inference_stats.describe())
 
     def _validate_config(self) -> Optional[TrainingConfig]:
         dataset_yaml = self.dataset_var.get().strip()
