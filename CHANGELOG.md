@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 - macOS one-click launcher now auto-creates a project virtual environment,
   installs dependencies, and remembers the bootstrap step so the app is ready to
   run after a single double-click.
+### Changed
+- Image preview window now scales images proportionally when resized so aspect
+  ratios are preserved even in smaller layouts.
 
 ## [1.5.1] - 2024-05-21
 ### Added
