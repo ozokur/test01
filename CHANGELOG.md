@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2024-05-21
+### Added
+- Automatic image preview window that opens while browsing and testing sample
+  images so you can see exactly what the model is evaluating.
+- Pillow integration (with graceful fallback) to resize previews and support
+  more image formats when available.
+- Documentation and requirements updates describing the preview workflow and
+  optional dependency.
+
 ## [1.3.1] - 2024-05-21
 ### Added
 - Detection summaries in the inference log so you can see when no objects were

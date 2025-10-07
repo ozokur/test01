@@ -33,7 +33,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Optional
 
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 
 
 def get_app_version() -> str:
@@ -66,6 +66,27 @@ def _load_ultralytics_model_class() -> Optional[Any]:
 
 
 YOLO_MODEL_CLASS = _load_ultralytics_model_class()
+
+
+def _load_pil_components() -> tuple[Optional[Any], Optional[Any]]:
+    """Return Pillow's ``Image`` and ``ImageTk`` modules when available."""
+
+    pillow_spec = importlib.util.find_spec("PIL")
+    if pillow_spec is None:
+        return None, None
+
+    image_spec = importlib.util.find_spec("PIL.Image")
+    imgtk_spec = importlib.util.find_spec("PIL.ImageTk")
+
+    if image_spec is None or imgtk_spec is None:
+        return None, None
+
+    image_module = importlib.import_module("PIL.Image")
+    imgtk_module = importlib.import_module("PIL.ImageTk")
+    return image_module, imgtk_module
+
+
+PIL_IMAGE_MODULE, PIL_IMAGETK_MODULE = _load_pil_components()
 
 
 def describe_cuda_support(torch_module: Optional[Any] = None) -> str:
@@ -340,6 +361,10 @@ class YOLOTrainerGUI:
         self.test_images: list[str] = []
         self.current_image_index: int = -1
         self.inference_stats = InferenceStats()
+        self.preview_window: Optional[tk.Toplevel] = None
+        self.preview_label: Optional[tk.Label] = None
+        self._preview_photo: Optional[tk.PhotoImage] = None
+        self._notified_missing_pillow = False
 
         self._create_widgets()
         self._start_log_updater()
@@ -562,15 +587,98 @@ class YOLOTrainerGUI:
         self.prev_button.configure(state=nav_state)
         self.next_button.configure(state=nav_state)
 
+    def _ensure_preview_window(self) -> None:
+        if self.preview_window is not None and self.preview_window.winfo_exists():
+            self.preview_window.deiconify()
+            return
+
+        self.preview_window = tk.Toplevel(self.root)
+        self.preview_window.title("Image Preview")
+        self.preview_window.geometry("960x720")
+        self.preview_window.protocol("WM_DELETE_WINDOW", self._on_preview_close)
+
+        self.preview_label = tk.Label(self.preview_window, anchor="center", bg="#202020")
+        self.preview_label.pack(fill=tk.BOTH, expand=True)
+
+    def _on_preview_close(self) -> None:
+        self._close_preview_window()
+
+    def _close_preview_window(self) -> None:
+        if self.preview_window is None:
+            return
+
+        if self.preview_window.winfo_exists():
+            self.preview_window.destroy()
+
+        self.preview_window = None
+        self.preview_label = None
+        self._preview_photo = None
+
+    def _display_current_image(self, image_path: str) -> None:
+        photo = self._create_photo_image(image_path)
+        if photo is None:
+            self._close_preview_window()
+            return
+
+        self._ensure_preview_window()
+        if not self.preview_window or not self.preview_label:
+            return
+
+        self.preview_window.title(f"Image Preview - {os.path.basename(image_path)}")
+        self._preview_photo = photo
+        self.preview_label.configure(image=photo)
+        self.preview_label.image = photo
+
+    def _create_photo_image(self, image_path: str) -> Optional[tk.PhotoImage]:
+        if PIL_IMAGE_MODULE is not None and PIL_IMAGETK_MODULE is not None:
+            try:
+                image = PIL_IMAGE_MODULE.open(image_path)
+                max_size = (960, 720)
+                resampling_attr = getattr(PIL_IMAGE_MODULE, "Resampling", None)
+                if resampling_attr is not None:
+                    resample = resampling_attr.LANCZOS
+                else:
+                    resample = getattr(PIL_IMAGE_MODULE, "LANCZOS", None)
+                    if resample is None:
+                        resample = getattr(PIL_IMAGE_MODULE, "ANTIALIAS", None)
+
+                if resample is not None:
+                    image.thumbnail(max_size, resample=resample)
+                else:
+                    image.thumbnail(max_size)
+
+                return PIL_IMAGETK_MODULE.PhotoImage(image=image)
+            except Exception as exc:
+                self._append_log(
+                    "Preview error: Pillow could not load "
+                    f"{os.path.basename(image_path)} ({exc}). Falling back to Tkinter loader."
+                )
+
+        if PIL_IMAGE_MODULE is None and not self._notified_missing_pillow:
+            self._append_log(
+                "Install Pillow to enable high-quality previews for additional image formats."
+            )
+            self._notified_missing_pillow = True
+
+        try:
+            return tk.PhotoImage(file=image_path)
+        except Exception as exc:
+            self._append_log(
+                f"Preview error: Unable to display {os.path.basename(image_path)} ({exc})."
+            )
+            return None
+
     def _update_current_image_label(self) -> None:
         if not self.test_images or self.current_image_index < 0:
             self.current_image_var.set("No image selected.")
+            self._close_preview_window()
             return
 
         image_path = self.test_images[self.current_image_index]
         self.current_image_var.set(
             f"Image {self.current_image_index + 1}/{len(self.test_images)}: {image_path}"
         )
+        self._display_current_image(image_path)
 
     def _show_next_image(self) -> None:
         if not self.test_images:
@@ -609,6 +717,7 @@ class YOLOTrainerGUI:
             return
 
         image_path = self.test_images[self.current_image_index]
+        self._display_current_image(image_path)
         task = self.task_var.get().strip() or "detect"
 
         command = [

@@ -12,6 +12,8 @@ select pre-trained weights, and start training with a friendly interface.
   `yolo` command line interface
 - (Optional) [PyTorch](https://pytorch.org/get-started/locally/) with CUDA
   support if you plan to leverage GPU acceleration
+- (Optional) [`Pillow`](https://pypi.org/project/Pillow/) for high-quality
+  previews of test images inside the GUI
 
 ## Quick command checklist
 
@@ -76,7 +78,8 @@ Run the GUI application:
    logs stream into the window. Use **Stop** to terminate the run early.
 5. Use the **Model Testing** panel to pick an image folder for quick
    predictions. Navigate between files with **← Previous** and **Next →**,
-   then click **Solve** to run inference on the highlighted image.
+   then click **Solve** to run inference on the highlighted image. A dedicated
+   preview window keeps the active picture visible while you browse and test.
 6. Review the CUDA status banner above the log area to confirm whether your
    environment exposes GPU acceleration for PyTorch.
 
@@ -105,13 +108,18 @@ After choosing a weights file you can test the model without leaving the GUI:
 1. Click **Select** inside the **Model Testing** panel and point to a folder
    containing sample images.
 2. Cycle through the images with the navigation buttons to preview filenames
-   and counts.
+   and counts. A separate preview window automatically opens to display the
+   highlighted image, resizing it to fit within the window.
 3. Press **Solve** to invoke `yolo mode=predict` on the active image. The log
    view displays CLI output alongside a summary of how long the inference took
    and whether any objects were detected.
 4. Keep an eye on the performance banner under the buttons to see how many
    images have been processed, together with the latest, average, and best
    inference times plus the detection count from the most recent run.
+
+> Close the preview window at any time if you need more space; it will pop back
+> up automatically the next time you navigate to an image or start a new test
+> run.
 
 The app automatically disables navigation buttons when only a single image is
 available and resets the statistics each time you choose a new folder.
