@@ -10,6 +10,8 @@ select pre-trained weights, and start training with a friendly interface.
 - Tkinter (included in most Python distributions)
 - [`ultralytics`](https://pypi.org/project/ultralytics/) package providing the
   `yolo` command line interface
+- (Optional) [PyTorch](https://pytorch.org/get-started/locally/) with CUDA
+  support if you plan to leverage GPU acceleration
 
 Install dependencies:
 
@@ -32,6 +34,8 @@ python yolo_gui.py
 3. Adjust epochs, batch size, image size, project name, and task as needed.
 4. Press **Start Training** to launch the YOLO CLI in the background. Training
    logs stream into the window. Use **Stop** to terminate the run early.
+5. Review the CUDA status banner above the log area to confirm whether your
+   environment exposes GPU acceleration for PyTorch.
 
 > **Note:** Ensure that the `yolo` executable from the `ultralytics` package is
 > available on your PATH before starting training.

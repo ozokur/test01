@@ -18,6 +18,7 @@ without needing to remember CLI flags.
 
 from __future__ import annotations
 
+import importlib
 import os
 import queue
 import shlex
@@ -26,7 +27,47 @@ import threading
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox, ttk
-from typing import Optional
+from typing import Any, Optional
+
+
+def _load_torch_module() -> Optional[Any]:
+    """Load the torch module if it is installed."""
+
+    if importlib.util.find_spec("torch") is None:
+        return None
+
+    return importlib.import_module("torch")
+
+
+TORCH_MODULE = _load_torch_module()
+
+
+def describe_cuda_support(torch_module: Optional[Any] = None) -> str:
+    """Return a human-readable description of CUDA availability."""
+
+    module = torch_module if torch_module is not None else TORCH_MODULE
+
+    if module is None:
+        return "CUDA Support: PyTorch not installed"
+
+    try:
+        if not getattr(module, "cuda", None):
+            return "CUDA Support: PyTorch without CUDA support"
+
+        if not module.cuda.is_available():
+            return "CUDA Support: Not available"
+
+        device_count = module.cuda.device_count()
+        if device_count == 0:
+            return "CUDA Support: No CUDA devices detected"
+
+        device_names = {
+            module.cuda.get_device_name(index) for index in range(device_count)
+        }
+        devices_str = ", ".join(sorted(device_names))
+        return f"CUDA Support: Available ({devices_str})"
+    except Exception:
+        return "CUDA Support: Unable to determine"
 
 
 @dataclass
@@ -148,21 +189,28 @@ class YOLOTrainerGUI:
         stop_button = ttk.Button(control_frame, text="Stop", command=self._stop_training)
         stop_button.pack(side=tk.LEFT, padx=5)
 
+        # CUDA status information
+        self.cuda_status_var = tk.StringVar(value="CUDA Support: Checking...")
+        cuda_label = ttk.Label(main_frame, textvariable=self.cuda_status_var)
+        cuda_label.grid(row=4, column=0, columnspan=3, sticky=tk.W, **padding)
+
+        self._update_cuda_status()
+
         # Log output
         log_label = ttk.Label(main_frame, text="Training Log")
-        log_label.grid(row=4, column=0, columnspan=3, sticky=tk.W, **padding)
+        log_label.grid(row=5, column=0, columnspan=3, sticky=tk.W, **padding)
 
         self.log_text = tk.Text(main_frame, height=15, wrap=tk.WORD)
-        self.log_text.grid(row=5, column=0, columnspan=3, sticky=tk.NSEW, **padding)
+        self.log_text.grid(row=6, column=0, columnspan=3, sticky=tk.NSEW, **padding)
 
         scrollbar = ttk.Scrollbar(
             main_frame, orient=tk.VERTICAL, command=self.log_text.yview
         )
-        scrollbar.grid(row=5, column=3, sticky=tk.NS)
+        scrollbar.grid(row=6, column=3, sticky=tk.NS)
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(5, weight=1)
+        main_frame.rowconfigure(6, weight=1)
 
     def _add_labeled_entry(
         self,
@@ -321,6 +369,9 @@ class YOLOTrainerGUI:
             self.root.after(200, poll_queue)
 
         poll_queue()
+
+    def _update_cuda_status(self) -> None:
+        self.cuda_status_var.set(describe_cuda_support())
 
 
 def main() -> None:
